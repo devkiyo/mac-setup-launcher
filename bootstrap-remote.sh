@@ -2,9 +2,11 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/devkiyo/mac-setup.git"
+REPO_OWNER="devkiyo"
+REPO_NAME="mac-setup"
 BRANCH="main"
 WORK_DIR="$HOME/.mac-setup"
+ARCHIVE_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/tarball/${BRANCH}"
 
 log() {
   printf '%s\n' "$*"
@@ -34,51 +36,70 @@ ensure_pat() {
   GITHUB_PAT_VALUE="$pat"
 }
 
-setup_askpass() {
-  ASKPASS_FILE="$(mktemp)"
-  cat > "$ASKPASS_FILE" <<'ASKPASS_EOF'
-#!/usr/bin/env bash
-case "$1" in
-  *Username*) printf '%s\n' 'x-access-token' ;;
-  *Password*) printf '%s\n' "$GITHUB_PAT_INTERNAL" ;;
-  *) printf '\n' ;;
-esac
-ASKPASS_EOF
-  chmod 700 "$ASKPASS_FILE"
-
-  export GITHUB_PAT_INTERNAL="$GITHUB_PAT_VALUE"
-  export GIT_ASKPASS="$ASKPASS_FILE"
-  export GIT_TERMINAL_PROMPT=0
-}
-
 cleanup() {
-  rm -f "${ASKPASS_FILE:-}"
-  unset GITHUB_PAT_INTERNAL
+  rm -rf "${TMP_DIR:-}"
   unset GITHUB_PAT_VALUE
 }
 
-clone_or_update_repo() {
-  if [[ -d "$WORK_DIR/.git" ]]; then
-    log "Updating existing repository at $WORK_DIR"
-    cd "$WORK_DIR"
-    git fetch origin "$BRANCH"
-    git checkout "$BRANCH"
-    git pull --ff-only origin "$BRANCH"
-    return
-  fi
+prepare_temp_paths() {
+  TMP_DIR="$(mktemp -d)"
+  ARCHIVE_FILE="$TMP_DIR/mac-setup.tar.gz"
+  EXTRACT_DIR="$TMP_DIR/extracted"
+  CURL_CONFIG_FILE="$TMP_DIR/curl.conf"
+}
 
+build_curl_config() {
+  cat > "$CURL_CONFIG_FILE" <<EOF_CURL
+url = "$ARCHIVE_URL"
+header = "Accept: application/vnd.github+json"
+header = "Authorization: Bearer ${GITHUB_PAT_VALUE}"
+header = "X-GitHub-Api-Version: 2022-11-28"
+location
+fail
+silent
+show-error
+output = "$ARCHIVE_FILE"
+EOF_CURL
+  chmod 600 "$CURL_CONFIG_FILE"
+}
+
+download_archive() {
+  log "Downloading private repository archive..."
+  curl --config "$CURL_CONFIG_FILE"
+}
+
+extract_archive() {
+  mkdir -p "$EXTRACT_DIR"
+  tar -xzf "$ARCHIVE_FILE" -C "$EXTRACT_DIR"
+
+  SOURCE_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [[ -z "$SOURCE_DIR" ]]; then
+    log "Error: アーカイブ展開に失敗しました。"
+    exit 1
+  fi
+}
+
+prepare_work_dir() {
   if [[ -e "$WORK_DIR" ]]; then
     local backup_path
     backup_path="$HOME/.mac-setup.backup.$(date +%Y%m%d-%H%M%S)"
-    log "Existing non-git directory found. Moving to: $backup_path"
+    log "Existing directory found. Moving to: $backup_path"
     mv "$WORK_DIR" "$backup_path"
   fi
+  mkdir -p "$WORK_DIR"
+}
 
-  log "Cloning private repository to $WORK_DIR"
-  git clone --branch "$BRANCH" "$REPO_URL" "$WORK_DIR"
+install_archive_contents() {
+  prepare_work_dir
+  (cd "$SOURCE_DIR" && tar -cf - .) | (cd "$WORK_DIR" && tar -xf -)
 }
 
 run_bootstrap() {
+  if [[ ! -f "$WORK_DIR/bootstrap.sh" ]]; then
+    log "Error: bootstrap.sh が見つかりません。"
+    exit 1
+  fi
+
   cd "$WORK_DIR"
   exec bash bootstrap.sh
 }
@@ -86,11 +107,16 @@ run_bootstrap() {
 main() {
   trap cleanup EXIT
 
-  need_cmd git
-  ensure_pat
-  setup_askpass
+  need_cmd curl
+  need_cmd tar
+  need_cmd mktemp
 
-  clone_or_update_repo
+  ensure_pat
+  prepare_temp_paths
+  build_curl_config
+  download_archive
+  extract_archive
+  install_archive_contents
   run_bootstrap
 }
 

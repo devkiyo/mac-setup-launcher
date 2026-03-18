@@ -43,7 +43,8 @@ GitHub PAT (repo read-only) を入力してください:
 
 ## 補足
 
+- `git` は不要です（`curl` と `tar` で private repo を取得します）。
 - `GITHUB_PAT` 環境変数がある場合は対話入力を省略できます。
-- clone 先は `~/.mac-setup` です。
-- `~/.mac-setup` が Git 管理外ディレクトリだった場合は
-  `~/.mac-setup.backup.YYYYMMDD-HHMMSS` に退避してから clone します。
+- 展開先は `~/.mac-setup` です。
+- `~/.mac-setup` が既にある場合は
+  `~/.mac-setup.backup.YYYYMMDD-HHMMSS` に退避してから再展開します。
