@@ -24,12 +24,18 @@ ensure_pat() {
   local pat="${GITHUB_PAT:-}"
 
   if [[ -z "$pat" ]]; then
-    read -r -s -p "GitHub PAT (repo read-only) を入力してください: " pat
-    printf '\n'
+    if [[ -t 0 ]]; then
+      read -r -s -p "GitHub PAT (repo read-only) を入力してください: " pat || true
+      printf '\n'
+    elif [[ -r /dev/tty ]]; then
+      read -r -s -p "GitHub PAT (repo read-only) を入力してください: " pat < /dev/tty || true
+      printf '\n' > /dev/tty
+    fi
   fi
 
   if [[ -z "$pat" ]]; then
     log "Error: PAT が空です。処理を中断します。"
+    log "Hint: curl 経由で実行する場合は GITHUB_PAT を環境変数で渡すか、対話端末で実行してください。"
     exit 1
   fi
 
